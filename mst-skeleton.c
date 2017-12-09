@@ -44,7 +44,7 @@ void readGraph(
       *padj = adj = (int *) malloc((nVtx*nVtx-(size-1)*nb_elements)*sizeof(adj[0]));
   else
       *padj = adj = (int *) malloc(nb_elements*sizeof(adj[0]));
-  
+
   if (rank == 0)
   {
       int i,j;
