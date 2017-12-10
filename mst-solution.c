@@ -7,12 +7,7 @@ typedef struct edge {
 } edge;
 
 void print_edge(edge *e) {
-  if (e->a > e->b) {
-    printf("%i %i\n", e->b, e->a);
-  }
-  else {
-    printf("%i %i\n", e->a, e->b);
-  }
+  printf("%i %i\n", e->a, e->b);
 }
 
 int root(int i, int *T) {
@@ -21,8 +16,42 @@ int root(int i, int *T) {
   return i;
 }
 
-int cmp_weight(const void *a, const void *b) {
-  return ((edge*)a)->w - ((edge*)b)->w;
+void order_edge(edge *e) {
+  if (e->a > e->b) {
+    int t = e->a;
+    e->a = e->b;
+    e->b = t;
+  }
+}
+
+// assuming egdes have extremities ordered such that e->a < e->b
+// compare two edges regarding to the lexicographic rule
+int cmp_edges(const void *a, const void *b) {
+  edge *u = (edge *)a;
+  edge *v = (edge *)b;
+
+  if (u->w == v->w) {
+    if (u->a < v->a || u->a == v->a && u->b < v->b) {
+      return -1;
+    }
+    else {
+      return 1;
+    }
+  }
+  else {
+    return ((edge *)a)->w - ((edge *)b)->w;
+  }
+}
+
+void min_edge(void *in, void *inout, int *len, MPI_Datatype *dptr) {
+  edge *a = (edge *)in;
+  edge *b = (edge *)inout;
+  for (int i = 0; i < *len; i++) {
+    if (a->w < b->w || a->w == b->w && (a->a < b->a || a->a == b->a && a->b < b->b))
+      *b = *a;
+    a++;
+    b++;
+  }
 }
 
 /** Computing the Minimum Spanning Tree of a graph
@@ -120,8 +149,8 @@ void computeMST(
     }
 
     // initialization
-    for (int a = 0; a < N - 1; a++) {
-      for (int b = a + 1; b < N; b++) {
+    for (int b = 1; b < N; b++) {
+      for (int a = 0; a < b; a++) {
         if (adj[a * N + b] > 0) {
           e = &edges[count++];
           e->a = a;
@@ -131,7 +160,7 @@ void computeMST(
       }
     }
 
-    qsort(edges, count, sizeof(edge), cmp_weight);
+    qsort(edges, count, sizeof(edge), cmp_edges);
 
     count = N - 1;
 
@@ -141,8 +170,6 @@ void computeMST(
         roota = root(e->a, T);
         rootb = root(e->b, T);
       } while (roota == rootb);
-
-      // TODO: care about lexicographic priority
 
       T[rootb] = roota;
 
@@ -157,6 +184,60 @@ void computeMST(
   } else if (strcmp(algoName, "prim-par") == 0) { // Parallel Prim's algorithm
     // BEGIN IMPLEMENTATION HERE
 
+    MPI_Op minop;
+    MPI_Datatype etype;
+
+    MPI_Type_contiguous(3, MPI_INT, &etype);
+    MPI_Type_commit(&etype);
+    MPI_Op_create(min_edge, 1, &minop);
+
+    int size = N * (int)ceil((float)N / (float)numProcs);
+    int offset = size * procRank;
+
+    if (procRank == numProcs - 1)
+      size = N * N - offset;
+
+    int *T = calloc(size, sizeof(int));
+    int *D = malloc(size * sizeof(int));
+    int *edges = NULL;
+    int *weights = NULL;
+
+    edge e, choice;
+
+    T[0] = -1;
+
+    // initialization (as always, we can just assume V = {0})
+    for (int i = size; i--;) {
+      D[i] = adj[i];
+    }
+
+    int count = N - 1;
+    int minw, a, b;
+    // tree construction
+    while (count--) {
+      minw = INT_MAX;
+
+      for (int i = 0; i < N; i++) {
+        if (T[i] != -1 && D[i] > 0 && D[i] < minw) {
+          a = i;
+          minw = D[i];
+        }
+      }
+
+      e.a = a + offset;
+      e.b = T[b];
+      e.w = minw;
+
+      order_edge(&e);
+      print_edge(&e);
+
+      // MPI_Allreduce(&e, &choice, 1, etype, minop, MPI_COMM_WORLD);
+    }
+
+    // garbage
+    free(T);
+    free(edges);
+    free(D);
   } else if (strcmp(algoName, "kruskal-par") == 0) { // Parallel Kruskal's algorithm
     // BEGIN IMPLEMENTATION HERE
 

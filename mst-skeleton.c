@@ -30,16 +30,19 @@ void readGraph(
   fscanf(file, " %d %d", pnVtx, pnEdge);
   nVtx = *pnVtx; nEdge = *pnEdge;
   int *edgeLeft = NULL, *edgeRight = NULL, *weightL = NULL;
+
   if (rank == 0)
   {
       edgeLeft = (int *) malloc(nEdge * sizeof(edgeLeft[0]));
       edgeRight = (int *) malloc(nEdge * sizeof(edgeRight[0]));
       weightL = (int *) malloc(nEdge * sizeof(weightL[0]));
   }
+
   tempadj = (int *) malloc(nVtx * nVtx * sizeof(tempadj[0]));
 
   //Allocate the matrix and fill it with input data
   int nb_elements = nVtx*(int)ceil((float)nVtx/(float)size);
+
   if (rank == size-1)
       *padj = adj = (int *) malloc((nVtx*nVtx-(size-1)*nb_elements)*sizeof(adj[0]));
   else
@@ -60,7 +63,6 @@ void readGraph(
       free(edgeLeft);
       free(edgeRight);
       free(weightL);
-
   }
 
   if (size > 1)
