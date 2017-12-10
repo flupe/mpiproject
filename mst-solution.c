@@ -15,6 +15,16 @@ void print_edge(edge *e) {
   }
 }
 
+int root(int i, int *T) {
+  while (T[i] != i)
+     i = T[i];
+  return i;
+}
+
+int cmp_weight(const void *a, const void *b) {
+  return ((edge*)a)->w - ((edge*)b)->w;
+}
+
 /** Computing the Minimum Spanning Tree of a graph
  * @param N the number of vertices in the graph
  * @param M the number of edges in the graph
@@ -48,7 +58,7 @@ void computeMST(
 
     int count = N - 1;
     int min, mini, a, b;
-    edge e;
+    edge *e;
 
     for (int y = 0; y < N; y++) {
         D[y] = adj[y];
@@ -58,7 +68,6 @@ void computeMST(
     while (count--) {
       min = INT_MAX;
 
-      // find minimum
       // TODO: respect lexicographic priority
       // TODO(maybe): heap
       for (int i = 0; i < N; i++) {
@@ -69,13 +78,13 @@ void computeMST(
       }
 
       b = T[a];
-      e = mst[count];
+      e = &(mst[count]);
 
-      e.a = a;
-      e.b = b;
-      e.w = min;
+      e->a = a;
+      e->b = b;
+      e->w = min;
 
-      print_edge(&e);
+      print_edge(e);
 
       T[a] = -1;
 
@@ -100,6 +109,51 @@ void computeMST(
     }
     // BEGIN IMPLEMENTATION HERE
 
+    int  *T     = malloc(N * sizeof(int));
+    edge *edges = malloc(M * sizeof(edge));
+    edge *mst   = malloc((N - 1) * sizeof(edge));
+    int count = 0, k = 0, roota, rootb;
+    edge *e;
+
+    for (int i = 0; i < N; i++) {
+      T[i] = i;
+    }
+
+    // initialization
+    for (int a = 0; a < N - 1; a++) {
+      for (int b = a + 1; b < N; b++) {
+        if (adj[a * N + b] > 0) {
+          e = &edges[count++];
+          e->a = a;
+          e->b = b;
+          e->w = adj[a * N + b];
+        }
+      }
+    }
+
+    qsort(edges, count, sizeof(edge), cmp_weight);
+
+    count = N - 1;
+
+    while (count--) {
+      do {
+        e = &edges[k++];
+        roota = root(e->a, T);
+        rootb = root(e->b, T);
+      } while (roota == rootb);
+
+      // TODO: care about lexicographic priority
+
+      T[rootb] = roota;
+
+      print_edge(e);
+      mst[count] = *e;
+    }
+
+    // garbage
+    free(edges);
+    free(mst);
+    free(T);
   } else if (strcmp(algoName, "prim-par") == 0) { // Parallel Prim's algorithm
     // BEGIN IMPLEMENTATION HERE
 
