@@ -6,6 +6,12 @@ typedef struct edge {
   int w;
 } edge;
 
+typedef struct p_edge {
+  int v;
+  int t;
+  edge e;
+} p_edge;
+
 void print_edge(edge *e) {
   printf("%i %i\n", e->a, e->b);
 }
@@ -24,29 +30,22 @@ void order_edge(edge *e) {
   }
 }
 
-// assuming egdes have extremities ordered such that e->a < e->b
-// compare two edges regarding to the lexicographic rule
+// pretty much identical, except one is for edges and the other for pedges
 int cmp_edges(const void *a, const void *b) {
   edge *u = (edge *)a;
   edge *v = (edge *)b;
 
-  if (u->w == v->w) {
-    if (u->a < v->a || u->a == v->a && u->b < v->b) {
-      return -1;
-    }
-    else {
-      return 1;
-    }
-  }
-  else {
-    return ((edge *)a)->w - ((edge *)b)->w;
-  }
+  if (u->w == v->w)
+    return (u->a < v->a || u->a == v->a && u->b < v->b) ? -1 : 1;
+  else
+    return u->w - v->w;
 }
 
 void min_edge(void *in, void *inout, int *len, MPI_Datatype *dptr) {
   edge *a = (edge *)in;
   edge *b = (edge *)inout;
-  for (int i = 0; i < *len; i++) {
+  int i = *len;
+  while(i--) {
     if (a->w < b->w || a->w == b->w && (a->a < b->a || a->a == b->a && a->b < b->b))
       *b = *a;
     a++;
@@ -79,56 +78,53 @@ void computeMST(
     }
     // BEGIN IMPLEMENTATION HERE
 
-    // initialization
-    int  *D   = malloc(N * sizeof(int));
-    edge *mst = malloc((N - 1) * sizeof(edge));
-    int  *T   = calloc(N, sizeof(int));
-    T[0] = -1;
+    p_edge *A, *D = malloc((N - 1) * sizeof(p_edge));
+    int addedi, added, count = N - 1;
+    edge choice;
+    int *V;
 
-    int count = N - 1;
-    int min, mini, a, b;
-    edge *e;
-
-    for (int y = 0; y < N; y++) {
-        D[y] = adj[y];
+    A = D;
+    for (int y = 1; y < N; y++, A++) {
+        A->e.w = adj[y];
+        A->t = A->e.a = 0;
+        A->v = A->e.b = y;
     }
 
     // tree construction
     while (count--) {
-      min = INT_MAX;
+      choice.w = INT_MAX;
 
-      // TODO: respect lexicographic priority
       // TODO(maybe): heap
-      for (int i = 0; i < N; i++) {
-        if (T[i] != -1 && D[i] > 0 && D[i] < min) {
-          a = i;
-          min = D[i];
+      for (int i = 0; i <= count; i++)
+        if (D[i].e.w > 0 && cmp_edges(&D[i].e, &choice) < 0) {
+          choice = D[i].e;
+          added  = D[i].v;
+          addedi = i;
         }
-      }
 
-      b = T[a];
-      e = &(mst[count]);
+      printf("%i %i\n", choice.a, choice.b);
+      D[addedi] = D[count];
 
-      e->a = a;
-      e->b = b;
-      e->w = min;
-
-      print_edge(e);
-
-      T[a] = -1;
-
-      for (int i = 0; i < N; i++) {
-        if (T[i] != -1 && (D[i] == 0 || adj[a * N + i] < D[i])) {
-          D[i] = adj[a * N + i];
-          T[i] = a;
+      V = adj + added * N;
+      for (int i = 0; i < count; i++) {
+        if (V[D[i].v] > 0 && (D[i].e.w == 0 || V[D[i].v] < D[i].e.w
+                                            || V[D[i].v] == D[i].e.w && added < D[i].t)) {
+          D[i].t = added;
+          D[i].e.w = V[D[i].v];
+          if (added < D[i].v) {
+            D[i].e.a = added;
+            D[i].e.b = D[i].v;
+          }
+          else {
+            D[i].e.a = D[i].v;
+            D[i].e.b = added;
+          }
         }
       }
     }
 
     // garbage
     free(D);
-    free(T);
-    free(mst);
   } else if (strcmp(algoName, "kruskal-seq") == 0) { // Sequential Kruskal's algorithm
     if (procRank == 0) {
       if (numProcs != 1) {
@@ -225,7 +221,7 @@ void computeMST(
       }
 
       e.a = a + offset;
-      e.b = T[b];
+      e.b = b;
       e.w = minw;
 
       order_edge(&e);
