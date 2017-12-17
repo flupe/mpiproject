@@ -1,22 +1,6 @@
 #include <limits.h>
-
-typedef struct edge {
-  int a;
-  int b;
-  int w;
-} edge;
-
-typedef struct p_edge {
-  int v;
-  int t;
-  edge e;
-} p_edge;
-
-int root(int i, int *T) {
-  while (T[i] != i)
-     i = T[i];
-  return i;
-}
+#include "mst-solution.h"
+#include "mst-kruskal.c"
 
 void order_edge(edge *e) {
   if (e->a > e->b) {
@@ -26,16 +10,6 @@ void order_edge(edge *e) {
   }
 }
 
-// pretty much identical, except one is for edges and the other for pedges
-int cmp_edges(const void *a, const void *b) {
-  edge *u = (edge *)a;
-  edge *v = (edge *)b;
-
-  if (u->w == v->w)
-    return (u->a < v->a || u->a == v->a && u->b < v->b) ? -1 : 1;
-  else
-    return u->w - v->w;
-}
 
 void min_edge(void *in, void *inout, int *len, MPI_Datatype *dptr) {
   edge *a = (edge *)in;
@@ -64,6 +38,16 @@ void computeMST(
   int procRank, numProcs;
   MPI_Comm_rank(MPI_COMM_WORLD, &procRank);
   MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
+
+  MPI_Op minop;
+  MPI_Datatype etype;
+
+  // defining a custom mpi datatype holding edges
+  MPI_Type_contiguous(3, MPI_INT, &etype);
+  MPI_Type_commit(&etype);
+
+  // defining a custom min reduce operation
+  MPI_Op_create(min_edge, 1, &minop);
 
   if (strcmp(algoName, "prim-seq") == 0) { // Sequential Prim's algorithm
     if (procRank == 0) {
@@ -130,56 +114,38 @@ void computeMST(
     }
     // BEGIN IMPLEMENTATION HERE
 
-    int  *T     = malloc(N * sizeof(int));
     edge *edges = malloc(M * sizeof(edge));
-    int count = 0, k = 0, roota, rootb;
+    int count = 0;
+    msf tree;
     edge *e;
 
-    for (int i = 0; i < N; i++) {
-      T[i] = i;
-    }
-
-    for (int b = 1; b < N; b++) {
-      for (int a = 0; a < b; a++) {
+    for (int b = 1; b < N; b++)
+      for (int a = 0; a < b; a++)
         if (adj[a * N + b] > 0) {
           e = &edges[count++];
           e->a = a;
           e->b = b;
           e->w = adj[a * N + b];
         }
-      }
-    }
 
     qsort(edges, count, sizeof(edge), cmp_edges);
+    kruskal(edges, count, N, &tree);
 
-    count = N - 1;
-
-    while (count--) {
-      do {
-        e = &edges[k++];
-        roota = root(e->a, T);
-        rootb = root(e->b, T);
-      } while (roota == rootb);
-
-      T[rootb] = roota;
-
+    // one drawback of reusing methods useful for parallel kruskal
+    // is that here we store the tree in memory, when it's not useful
+    // since we only have one processor and we would do just as good
+    // if we just printed edges as we found them
+    for (int i = 0; i < N - 1; i++) {
+      e = &(tree.edges[i]);
       printf("%i %i\n", e->a, e->b);
     }
 
     free(edges);
-    free(T);
+    free(tree.edges);
+
   } else if (strcmp(algoName, "prim-par") == 0) { // Parallel Prim's algorithm
     // BEGIN IMPLEMENTATION HERE
 
-    MPI_Op minop;
-    MPI_Datatype etype;
-
-    // defining a custom mpi datatype holding edges
-    MPI_Type_contiguous(3, MPI_INT, &etype);
-    MPI_Type_commit(&etype);
-
-    // defining a custom min reduce operation
-    MPI_Op_create(min_edge, 1, &minop);
 
     int size = ceil((float)N / (float)numProcs);
     int length = size * N;
@@ -194,7 +160,6 @@ void computeMST(
     int *V, *T = calloc(N, sizeof(int));
     edge pick, choice;
     int added;
-    int local_count = size;
 
     if (procRank == 0) {
       T[0] = 1;
@@ -212,21 +177,16 @@ void computeMST(
     while (count--) {
       choice.w = INT_MAX;
 
-      if (local_count)
-        for (int i = 0; i < size; i++)
-          if (!T[i + offset] && D[i].e.w > 0 && cmp_edges(&D[i].e, &choice) < 0) {
-            choice = D[i].e;
-          }
-      }
+      for (int i = 0; i < size; i++)
+        if (!T[i + offset] && D[i].e.w > 0 && cmp_edges(&D[i].e, &choice) < 0) {
+          choice = D[i].e;
+        }
 
       MPI_Allreduce(&choice, &pick, 1, etype, minop, MPI_COMM_WORLD);
 
       if (procRank == 0)
         printf("%i %i\n", pick.a, pick.b);
 
-      if (pick == choice) {
-        local_count--;
-      }
 
       added = T[pick.a] ? pick.b : pick.a;
       T[added] = 1;
@@ -253,6 +213,78 @@ void computeMST(
     free(D);
   } else if (strcmp(algoName, "kruskal-par") == 0) { // Parallel Kruskal's algorithm
     // BEGIN IMPLEMENTATION HERE
+
+    int size = ceil((float)N / (float)numProcs);
+    int offset = size * procRank;
+    int rank = procRank;
+    int procs = numProcs;
+    int step = 0;
+    msf forest;
+
+    if (procRank == numProcs - 1) {
+      size = N - offset;
+    }
+
+
+
+    // FIRST STEP: LOCAL KRUSKAL
+    edge *edges = malloc(M * sizeof(edge));
+    int count = 0;
+
+    msf tree;
+    edge *e;
+
+    for (int a = 0; a < size; a++)
+      for (int b = a + offset + 1; b < N; b++)
+        if (adj[a * N + b] > 0) {
+          e = &edges[count++];
+          e->a = a + offset;
+          e->b = b;
+          e->w = adj[a * N + b];
+        }
+
+    qsort(edges, count, sizeof(edge), cmp_edges);
+    kruskal(edges, count, N, &forest);
+
+
+
+    // SECOND STEP: P2P MERGE
+    // reserve memory for received data
+    msf incoming;
+    incoming.edges = malloc(N * sizeof(edge));
+
+    while (procs > 1) {
+      // odd rank, send data to associated processor with even rank
+      // (associated even processor always exists)
+      if (rank & 1) {
+        int target = (rank ^ 1) << step;
+        MPI_Send(&forest.size, 1, MPI_INT, target, 0, MPI_COMM_WORLD);
+        MPI_Send(forest.edges, forest.size, etype, target, 0, MPI_COMM_WORLD);
+        break;
+      }
+
+      // if rank is even, check if we should actually expect data from some odd processor
+      else if(rank + 1 < procs) {
+        int target = (rank | 1) << step;
+        MPI_Recv(&incoming.size, 1, MPI_INT, target, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(incoming.edges, incoming.size, etype, target, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        merge(&forest, &incoming, N);
+      }
+
+      procs = (procs + 1) >> 1;
+      rank >>= 1;
+      step++;
+    }
+
+    // processor 0 now has all the data
+    if (procRank == 0)
+      for (int i = 0; i < N - 1; i++) {
+        e = &forest.edges[i];
+        printf("%i %i\n", e->a, e->b);
+      }
+
+    free(edges);
+    free(forest.edges);
 
   } else { // Invalid algorithm name
     if (procRank == 0) {
