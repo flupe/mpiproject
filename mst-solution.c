@@ -12,10 +12,6 @@ typedef struct p_edge {
   edge e;
 } p_edge;
 
-void print_edge(edge *e) {
-  printf("%i %i\n", e->a, e->b);
-}
-
 int root(int i, int *T) {
   while (T[i] != i)
      i = T[i];
@@ -136,7 +132,6 @@ void computeMST(
 
     int  *T     = malloc(N * sizeof(int));
     edge *edges = malloc(M * sizeof(edge));
-    edge *mst   = malloc((N - 1) * sizeof(edge));
     int count = 0, k = 0, roota, rootb;
     edge *e;
 
@@ -144,7 +139,6 @@ void computeMST(
       T[i] = i;
     }
 
-    // initialization
     for (int b = 1; b < N; b++) {
       for (int a = 0; a < b; a++) {
         if (adj[a * N + b] > 0) {
@@ -169,13 +163,10 @@ void computeMST(
 
       T[rootb] = roota;
 
-      print_edge(e);
-      mst[count] = *e;
+      printf("%i %i\n", e->a, e->b);
     }
 
-    // garbage
     free(edges);
-    free(mst);
     free(T);
   } else if (strcmp(algoName, "prim-par") == 0) { // Parallel Prim's algorithm
     // BEGIN IMPLEMENTATION HERE
@@ -183,56 +174,82 @@ void computeMST(
     MPI_Op minop;
     MPI_Datatype etype;
 
+    // defining a custom mpi datatype holding edges
     MPI_Type_contiguous(3, MPI_INT, &etype);
     MPI_Type_commit(&etype);
+
+    // defining a custom min reduce operation
     MPI_Op_create(min_edge, 1, &minop);
 
-    int size = N * (int)ceil((float)N / (float)numProcs);
+    int size = ceil((float)N / (float)numProcs);
+    int length = size * N;
     int offset = size * procRank;
 
-    if (procRank == numProcs - 1)
-      size = N * N - offset;
+    if (procRank == numProcs - 1) {
+      size = N - offset;
+      length = N * N - length;
+    }
 
-    int *T = calloc(size, sizeof(int));
-    int *D = malloc(size * sizeof(int));
-    int *edges = NULL;
-    int *weights = NULL;
+    p_edge *A, *D = malloc(size * sizeof(int));
+    int *V, *T = calloc(N, sizeof(int));
+    edge pick, choice;
+    int added;
+    int local_count = size;
 
-    edge e, choice;
+    if (procRank == 0) {
+      T[0] = 1;
+    }
 
-    T[0] = -1;
-
-    // initialization (as always, we can just assume V = {0})
-    for (int i = size; i--;) {
-      D[i] = adj[i];
+    for (int y = 0; y < size; y++) {
+        D[y].e.w = adj[y * N];
+        D[y].t = D[y].e.a = 0;
+        D[y].v = y;
+        D[y].e.b = y + offset;
     }
 
     int count = N - 1;
-    int minw, a, b;
-    // tree construction
-    while (count--) {
-      minw = INT_MAX;
 
-      for (int i = 0; i < N; i++) {
-        if (T[i] != -1 && D[i] > 0 && D[i] < minw) {
-          a = i;
-          minw = D[i];
-        }
+    while (count--) {
+      choice.w = INT_MAX;
+
+      if (local_count)
+        for (int i = 0; i < size; i++)
+          if (!T[i + offset] && D[i].e.w > 0 && cmp_edges(&D[i].e, &choice) < 0) {
+            choice = D[i].e;
+          }
       }
 
-      e.a = a + offset;
-      e.b = b;
-      e.w = minw;
+      MPI_Allreduce(&choice, &pick, 1, etype, minop, MPI_COMM_WORLD);
 
-      order_edge(&e);
-      print_edge(&e);
+      if (procRank == 0)
+        printf("%i %i\n", pick.a, pick.b);
 
-      // MPI_Allreduce(&e, &choice, 1, etype, minop, MPI_COMM_WORLD);
+      if (pick == choice) {
+        local_count--;
+      }
+
+      added = T[pick.a] ? pick.b : pick.a;
+      T[added] = 1;
+
+      for (int i = 0; i < size; i++) {
+        if (!T[i + offset] && adj[i * N + added] > 0 && (D[i].e.w == 0 || adj[i * N + added] < D[i].e.w
+                           || adj[i * N + added] == D[i].e.w && added < D[i].t)) {
+          D[i].t = added;
+          D[i].e.w = adj[i * N + added];
+          if (added < D[i].e.a) {
+            D[i].e.a = added;
+            D[i].e.b = D[i].v + offset;
+          }
+          else {
+            D[i].e.a = D[i].v + offset;
+            D[i].e.b = added;
+          }
+        }
+      }
     }
 
     // garbage
     free(T);
-    free(edges);
     free(D);
   } else if (strcmp(algoName, "kruskal-par") == 0) { // Parallel Kruskal's algorithm
     // BEGIN IMPLEMENTATION HERE
