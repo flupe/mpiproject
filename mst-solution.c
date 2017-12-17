@@ -14,8 +14,7 @@ void order_edge(edge *e) {
 void min_edge(void *in, void *inout, int *len, MPI_Datatype *dptr) {
   edge *a = (edge *)in;
   edge *b = (edge *)inout;
-  int i = *len;
-  while(i--) {
+  for (int i = 0; i < *len; i++) {
     if (a->w < b->w || a->w == b->w && (a->a < b->a || a->a == b->a && a->b < b->b))
       *b = *a;
     a++;
@@ -39,15 +38,14 @@ void computeMST(
   MPI_Comm_rank(MPI_COMM_WORLD, &procRank);
   MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
 
-  MPI_Op minop;
+  // defining a custom MPI datatype holding edges
   MPI_Datatype etype;
-
-  // defining a custom mpi datatype holding edges
   MPI_Type_contiguous(3, MPI_INT, &etype);
   MPI_Type_commit(&etype);
 
   // defining a custom min reduce operation
-  MPI_Op_create(min_edge, 1, &minop);
+  MPI_Op minop;
+  MPI_Op_create((MPI_User_function *)min_edge, 1, &minop);
 
   if (strcmp(algoName, "prim-seq") == 0) { // Sequential Prim's algorithm
     if (procRank == 0) {
@@ -146,14 +144,11 @@ void computeMST(
   } else if (strcmp(algoName, "prim-par") == 0) { // Parallel Prim's algorithm
     // BEGIN IMPLEMENTATION HERE
 
-
     int size = ceil((float)N / (float)numProcs);
-    int length = size * N;
     int offset = size * procRank;
 
     if (procRank == numProcs - 1) {
       size = N - offset;
-      length = N * N - length;
     }
 
     p_edge *A, *D = malloc(size * sizeof(int));
@@ -161,9 +156,7 @@ void computeMST(
     edge pick, choice;
     int added;
 
-    if (procRank == 0) {
-      T[0] = 1;
-    }
+    T[0] = 1;
 
     for (int y = 0; y < size; y++) {
         D[y].e.w = adj[y * N];
@@ -172,31 +165,32 @@ void computeMST(
         D[y].e.b = y + offset;
     }
 
-    int count = N - 1;
+    int count = N - 2;
 
     while (count--) {
       choice.w = INT_MAX;
 
-      for (int i = 0; i < size; i++)
+      for (int i = 0; i < size; i++) {
         if (!T[i + offset] && D[i].e.w > 0 && cmp_edges(&D[i].e, &choice) < 0) {
           choice = D[i].e;
         }
+      }
 
       MPI_Allreduce(&choice, &pick, 1, etype, minop, MPI_COMM_WORLD);
 
       if (procRank == 0)
-        printf("%i %i\n", pick.a, pick.b);
-
+        printf("%d %d\n", pick.a, pick.b);
 
       added = T[pick.a] ? pick.b : pick.a;
       T[added] = 1;
 
       for (int i = 0; i < size; i++) {
-        if (!T[i + offset] && adj[i * N + added] > 0 && (D[i].e.w == 0 || adj[i * N + added] < D[i].e.w
-                           || adj[i * N + added] == D[i].e.w && added < D[i].t)) {
+        int dist = adj[i * N + added];
+        if (!T[i + offset] && dist > 0 && (D[i].e.w == 0 || dist < D[i].e.w
+                           || dist == D[i].e.w && added < D[i].t)) {
           D[i].t = added;
-          D[i].e.w = adj[i * N + added];
-          if (added < D[i].e.a) {
+          D[i].e.w = dist;
+          if (added < D[i].v + offset) {
             D[i].e.a = added;
             D[i].e.b = D[i].v + offset;
           }
@@ -208,9 +202,9 @@ void computeMST(
       }
     }
 
-    // garbage
     free(T);
     free(D);
+
   } else if (strcmp(algoName, "kruskal-par") == 0) { // Parallel Kruskal's algorithm
     // BEGIN IMPLEMENTATION HERE
 
