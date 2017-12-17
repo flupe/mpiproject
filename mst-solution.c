@@ -10,7 +10,6 @@ void order_edge(edge *e) {
   }
 }
 
-
 void min_edge(void *in, void *inout, int *len, MPI_Datatype *dptr) {
   edge *a = (edge *)in;
   edge *b = (edge *)inout;
@@ -151,7 +150,7 @@ void computeMST(
       size = N - offset;
     }
 
-    p_edge *A, *D = malloc(size * sizeof(int));
+    p_edge *A, *D = malloc(size * sizeof(p_edge));
     int *V, *T = calloc(N, sizeof(int));
     edge pick, choice;
     int added;
@@ -165,7 +164,7 @@ void computeMST(
         D[y].e.b = y + offset;
     }
 
-    int count = N - 2;
+    int count = N - 1;
 
     while (count--) {
       choice.w = INT_MAX;
@@ -218,8 +217,6 @@ void computeMST(
     if (procRank == numProcs - 1) {
       size = N - offset;
     }
-
-
 
     // FIRST STEP: LOCAL KRUSKAL
     edge *edges = malloc(M * sizeof(edge));
